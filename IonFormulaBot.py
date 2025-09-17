@@ -49,10 +49,10 @@ PER_QUESTION_SECONDS = 15   # seconds per question
 # Helpers
 # ---------------------------
 
-def cancel_jobs(context: ContextTypes.DEFAULT_TYPE):
-    """Cancel countdown task for the current chat if it exists."""
+def cancel_jobs(context: ContextTypes.DEFAULT_TYPE, force: bool = False):
+    """Cancel countdown task if question is solved or force=True."""
     task = context.chat_data.get("countdown_task")
-    if task and not task.done():
+    if task and not task.done() and (force or not context.chat_data.get("question_active", False)):
         task.cancel()
     context.chat_data["countdown_task"] = None
 
@@ -111,11 +111,11 @@ async def send_question(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
 
     # Prepare next question
     question = context.chat_data["remaining_qs"].pop(0)
-    context.chat_data["current_q"] = question
-    context.chat_data["q_count"] += 1
     context.chat_data["question_active"] = True
     context.chat_data["solved_by"] = None
     context.chat_data["time_left"] = PER_QUESTION_SECONDS
+    context.chat_data["current_q"] = question
+    context.chat_data["q_count"] += 1
 
     # Send the question with initial countdown
     qnum = context.chat_data["q_count"]
@@ -130,40 +130,33 @@ async def send_question(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
     context.chat_data["countdown_task"] = asyncio.create_task(question_countdown(chat_id, context))
 
 async def question_countdown(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
-    """Countdown for each question, updating message at 15, 10, 5s, and ending question."""
     while context.chat_data.get("question_active", False):
         left = context.chat_data.get("time_left", PER_QUESTION_SECONDS)
 
-        # Update message only at 15, 10, 5 seconds
+        # Update countdown message at 15, 10, 5 seconds
         if left in [15, 10, 5]:
             msg_id = context.chat_data.get("countdown_msg_id")
             q = context.chat_data.get("current_q", {})
             qnum = context.chat_data.get("q_count", 0)
             if msg_id and q:
                 try:
-                    try:
-                        await context.bot.edit_message_text(
-                            chat_id=chat_id,
-                            message_id=msg_id,
-                            text=f"Q{qnum}: {q['question']}\n\n⏳ {left}s left… Quickly!"
-                        )
-                    except Exception as e:
-                        print(f"Warning editing message: {e}")
-
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        text=f"Q{qnum}: {q['question']}\n\n⏳ {left}s left… Quickly!"
+                    )
                 except Exception:
                     pass
 
+        # Time's up
         if left <= 0:
             context.chat_data["question_active"] = False
-            # Send times up message and move to next question
+            context.chat_data["countdown_task"] = None
             answer = context.chat_data.get("current_q", {}).get("answer", "?")
-            try:
-                await context.bot.send_message(chat_id, f"⏰ Time's up! The correct answer is {answer}")
-            except Exception as e:
-                print(f"Warning sending times up: {e}")
-            await send_question(chat_id, context)
+            await context.bot.send_message(chat_id, f"⏰ Time's up! The correct answer is {answer}")
+            await asyncio.sleep(1)  # small delay to avoid flooding
+            await send_question(chat_id, context)  # move to next question
             break
-
         # Decrement timer and sleep 1 second
         context.chat_data["time_left"] = left - 1
         await asyncio.sleep(1)
@@ -235,7 +228,7 @@ async def send_final_score(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
         await context.bot.send_message(chat_id, f"🏁 Round Finished ({ROUND_LENGTH} questions)!\n\n🏆 Final Scoreboard:\n{board}")
 
     # Clean up round state
-    cancel_jobs(context)
+    cancel_jobs(context, force=True)
     context.chat_data.clear()
 
 # ---------------------------
