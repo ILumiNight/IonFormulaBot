@@ -59,6 +59,10 @@ def cancel_jobs(context: ContextTypes.DEFAULT_TYPE):
                 pass
             context.chat_data[key] = None
 
+# Wrapper for JobQueue to call async times_up
+def times_up_sync(context: ContextTypes.DEFAULT_TYPE):
+    context.application.create_task(times_up(context))
+
 # ---------------------------
 # Commands
 # ---------------------------
@@ -137,7 +141,7 @@ async def send_question(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
     tick_sync, interval=1, first=0, chat_id=chat_id
     )
     context.chat_data["timeout_job"] = context.job_queue.run_once(
-        times_up, when=PER_QUESTION_SECONDS, chat_id=chat_id
+    times_up_sync, when=PER_QUESTION_SECONDS, chat_id=chat_id
     )
 
 async def tick(context: ContextTypes.DEFAULT_TYPE):
