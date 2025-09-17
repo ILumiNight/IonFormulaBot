@@ -50,19 +50,11 @@ PER_QUESTION_SECONDS = 15   # seconds per question
 # ---------------------------
 
 def cancel_jobs(context: ContextTypes.DEFAULT_TYPE):
-    """Cancel tick + timeout jobs for the current chat if they exist."""
-    for key in ("tick_job", "timeout_job"):
-        job = context.chat_data.get(key)
-        if job:
-            try:
-                job.schedule_removal()
-            except Exception:
-                pass
-            context.chat_data[key] = None
-
-# Wrapper for JobQueue to call async times_up
-def times_up_sync(context: ContextTypes.DEFAULT_TYPE):
-    context.application.create_task(times_up(context))
+    """Cancel countdown task for the current chat if it exists."""
+    task = context.chat_data.get("countdown_task")
+    if task and not task.done():
+        task.cancel()
+    context.chat_data["countdown_task"] = None
 
 # ---------------------------
 # Commands
@@ -135,7 +127,7 @@ async def send_question(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
 
     # Start countdown task
     context.chat_data["question_active"] = True
-    asyncio.create_task(question_countdown(chat_id, context))
+    context.chat_data["countdown_task"] = asyncio.create_task(question_countdown(chat_id, context))
 
 async def question_countdown(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
     """Countdown for each question, updating message at 15, 10, 5s, and ending question."""
@@ -149,11 +141,15 @@ async def question_countdown(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
             qnum = context.chat_data.get("q_count", 0)
             if msg_id and q:
                 try:
-                    await context.bot.edit_message_text(
-                        chat_id=chat_id,
-                        message_id=msg_id,
-                        text=f"Q{qnum}: {q['question']}\n\n⏳ {left}s left… Quickly!"
-                    )
+                    try:
+                        await context.bot.edit_message_text(
+                            chat_id=chat_id,
+                            message_id=msg_id,
+                            text=f"Q{qnum}: {q['question']}\n\n⏳ {left}s left… Quickly!"
+                        )
+                    except Exception as e:
+                        print(f"Warning editing message: {e}")
+
                 except Exception:
                     pass
 
@@ -161,7 +157,10 @@ async def question_countdown(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
             context.chat_data["question_active"] = False
             # Send times up message and move to next question
             answer = context.chat_data.get("current_q", {}).get("answer", "?")
-            await context.bot.send_message(chat_id, f"⏰ Time's up! The correct answer is {answer}")
+            try:
+                await context.bot.send_message(chat_id, f"⏰ Time's up! The correct answer is {answer}")
+            except Exception as e:
+                print(f"Warning sending times up: {e}")
             await send_question(chat_id, context)
             break
 
@@ -206,11 +205,16 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Announce winner and their score
         display_score = scores[user_id]
-        await update.message.reply_text(
-            f"✅ {user_name} got it first! (+1) Current points: {display_score}"
-        )
+        try:
+            await update.message.reply_text(
+                f"✅ {user_name} got it first! (+1) Current points: {display_score}"
+            )
+        except Exception as e:
+            print(f"Warning announcing winner: {e}")
 
-        # Move to next question immediately
+        
+        # Wait 1 second before sending next question to avoid flood
+        await asyncio.sleep(1)
         await send_question(update.effective_chat.id, context)
 
     # No response for wrong answers
