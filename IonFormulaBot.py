@@ -95,6 +95,21 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
     })
     await send_question(chat_id, context)
 
+async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Stop the current quiz immediately."""
+    chat_id = update.effective_chat.id
+
+    # Check if a quiz is active
+    if not context.chat_data.get("question_active") and not context.chat_data.get("current_q"):
+        await update.message.reply_text("⚠️ No active quiz to stop.")
+        return
+
+    # Cancel countdown task
+    cancel_jobs(context, force=True)
+
+    # Optionally show the current scoreboard
+    await update.message.reply_text("🛑 Quiz has been stopped.")
+
 # ---------------------------
 # Core flow
 # ---------------------------
@@ -207,7 +222,7 @@ async def handle_answer(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         
         # Wait 1 second before sending next question to avoid flood
-        await asyncio.sleep(1)
+        await asyncio.sleep(2)
         await send_question(update.effective_chat.id, context)
 
     # No response for wrong answers
@@ -241,6 +256,7 @@ if __name__ == "__main__":
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("quiz", quiz))
+    app.add_handler(CommandHandler("stop", stop))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_answer))
 
     app.run_polling()
