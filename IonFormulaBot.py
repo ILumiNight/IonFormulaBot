@@ -3,6 +3,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 import random
 import re
 import time
+import os
 
 # ---------------------------
 # Question bank (no repeats per round)
@@ -265,7 +266,6 @@ async def send_final_score(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------
 if __name__ == "__main__":
     # Put your token in quotes:
-    import os
     TOKEN = os.environ.get("BOT_TOKEN")
     app = Application.builder().token(TOKEN).build()
 
