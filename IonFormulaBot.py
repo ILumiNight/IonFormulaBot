@@ -99,16 +99,24 @@ async def stop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Stop the current quiz immediately."""
     chat_id = update.effective_chat.id
 
-    # Check if a quiz is active
-    if not context.chat_data.get("question_active") and not context.chat_data.get("current_q"):
+    if not context.chat_data.get("current_q") and not context.chat_data.get("question_active"):
         await update.message.reply_text("⚠️ No active quiz to stop.")
         return
 
     # Cancel countdown task
     cancel_jobs(context, force=True)
 
-    # Optionally show the current scoreboard
-    await update.message.reply_text("🛑 Quiz has been stopped.")
+    # Clear all quiz-related state
+    context.chat_data["question_active"] = False
+    context.chat_data["current_q"] = None
+    context.chat_data["remaining_qs"] = []
+    context.chat_data["solved_by"] = None
+    context.chat_data["q_count"] = 0
+    context.chat_data["scores"] = {}
+    context.chat_data["names"] = {}
+
+    await update.message.reply_text("🛑 Quiz has been stopped. You can now start a new round with /quiz.")
+
 
 # ---------------------------
 # Core flow
