@@ -4,6 +4,7 @@ import random
 import re
 import time
 import os
+import asyncio
 
 # ---------------------------
 # Question bank (no repeats per round)
@@ -106,10 +107,6 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Core flow
 # ---------------------------
 
-# Synchronous wrapper for JobQueue to call async tick
-def tick_sync(context: ContextTypes.DEFAULT_TYPE):
-    context.application.create_task(tick(context))
-
 async def send_question(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
     """Send next question or finish the round."""
     # End condition
@@ -136,74 +133,41 @@ async def send_question(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
     )
     context.chat_data["countdown_msg_id"] = msg.message_id
 
-    # Schedule tick (every 1 second) and timeout
-    context.chat_data["tick_job"] = context.application.job_queue.run_repeating(
-    tick, interval=1, first=1, chat_id=chat_id
-    )
-    context.chat_data["timeout_job"] = context.application.job_queue.run_once(
-    times_up_sync, when=PER_QUESTION_SECONDS, chat_id=chat_id
-    )
+    # Start countdown task
+    context.chat_data["question_active"] = True
+    asyncio.create_task(question_countdown(chat_id, context))
 
-async def tick(context: ContextTypes.DEFAULT_TYPE):
-    """Update the countdown message only at 15s, 10s, and 5s left."""
-    chat_id = context.job.chat_id
+async def question_countdown(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
+    """Countdown for each question, updating message at 15, 10, 5s, and ending question."""
+    while context.chat_data.get("question_active", False):
+        left = context.chat_data.get("time_left", PER_QUESTION_SECONDS)
 
-    # Stop ticking if question is already solved
-    if not context.chat_data.get("question_active", False):
-        try:
-            context.job.schedule_removal()
-        except Exception:
-            pass
-        context.chat_data["tick_job"] = None
-        return
+        # Update message only at 15, 10, 5 seconds
+        if left in [15, 10, 5]:
+            msg_id = context.chat_data.get("countdown_msg_id")
+            q = context.chat_data.get("current_q", {})
+            qnum = context.chat_data.get("q_count", 0)
+            if msg_id and q:
+                try:
+                    await context.bot.edit_message_text(
+                        chat_id=chat_id,
+                        message_id=msg_id,
+                        text=f"Q{qnum}: {q['question']}\n\n⏳ {left}s left… Quickly!"
+                    )
+                except Exception:
+                    pass
 
-    # Decrement time left
-    left = context.chat_data.get("time_left", PER_QUESTION_SECONDS) - 1
-    context.chat_data["time_left"] = left
+        if left <= 0:
+            context.chat_data["question_active"] = False
+            # Send times up message and move to next question
+            answer = context.chat_data.get("current_q", {}).get("answer", "?")
+            await context.bot.send_message(chat_id, f"⏰ Time's up! The correct answer is {answer}")
+            await send_question(chat_id, context)
+            break
 
-    # Only update the countdown message at 15, 10, or 5 seconds
-    if left in [15, 10, 5]:
-        msg_id = context.chat_data.get("countdown_msg_id")
-        q = context.chat_data.get("current_q", {})
-        qnum = context.chat_data.get("q_count", 0)
-        if msg_id and q:
-            try:
-                await context.bot.edit_message_text(
-                    chat_id=chat_id,
-                    message_id=msg_id,
-                    text=f"Q{qnum}: {q['question']}\n\n⏳ {left}s left… Quickly!"
-                )
-            except Exception:
-                pass
-
-    # Stop ticking at 0; the timeout job will handle the transition
-    if left <= 0:
-        try:
-            context.job.schedule_removal()
-        except Exception:
-            pass
-        context.chat_data["tick_job"] = None
-
-async def times_up(context: ContextTypes.DEFAULT_TYPE):
-    """Handle when time runs out."""
-    chat_id = context.job.chat_id
-
-    # Only trigger if question is still active
-    if not context.chat_data.get("question_active", False):
-        return
-
-    # Mark question as inactive
-    context.chat_data["question_active"] = False
-
-    # Cancel any remaining jobs safely
-    cancel_jobs(context)
-
-    # Send the correct answer
-    answer = context.chat_data.get("current_q", {}).get("answer", "?")
-    await context.bot.send_message(chat_id, f"⏰ Time's up! The correct answer is {answer}")
-
-    # Move to next question
-    await send_question(chat_id, context)
+        # Decrement timer and sleep 1 second
+        context.chat_data["time_left"] = left - 1
+        await asyncio.sleep(1)
 
 # ---------------------------
 # Answers
