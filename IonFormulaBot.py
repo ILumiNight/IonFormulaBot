@@ -101,6 +101,11 @@ async def quiz(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------
 # Core flow
 # ---------------------------
+
+# Synchronous wrapper for JobQueue to call async tick
+def tick_sync(context: ContextTypes.DEFAULT_TYPE):
+    context.application.create_task(tick(context))
+
 async def send_question(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
     """Send next question or finish the round."""
     # End condition
@@ -129,7 +134,7 @@ async def send_question(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
 
     # Schedule tick (every 1 second) and timeout
     context.chat_data["tick_job"] = context.job_queue.run_repeating(
-        tick, interval=1, first=1, chat_id=chat_id
+    tick_sync, interval=1, first=0, chat_id=chat_id
     )
     context.chat_data["timeout_job"] = context.job_queue.run_once(
         times_up, when=PER_QUESTION_SECONDS, chat_id=chat_id
