@@ -140,7 +140,7 @@ async def send_question(chat_id: int, context: ContextTypes.DEFAULT_TYPE):
     context.chat_data["tick_job"] = context.application.job_queue.run_repeating(
     tick, interval=1, first=1, chat_id=chat_id
     )
-context.chat_data["timeout_job"] = context.application.job_queue.run_once(
+    context.chat_data["timeout_job"] = context.application.job_queue.run_once(
     times_up_sync, when=PER_QUESTION_SECONDS, chat_id=chat_id
     )
 
